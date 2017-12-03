@@ -1,0 +1,666 @@
+#!/usr/bin/env Rscript
+rm(list=ls())
+
+## Collect arguments
+args = commandArgs(trailingOnly=TRUE)
+
+## Default setting when no arguments passed
+if(length(args) < 1) {
+  args <- c("--help")
+}
+
+# Help section
+if("--help"  %in% args || "-h"  %in% args || "-?" %in% args) {
+  cat("
+      About: Parses output of samtools stats (former bamcheck) and uses the R graph interface to create plots.
+
+      Usage: ./plot-bamstats [OPTIONS] file.bam.bc
+             ./plot-bamstats -d outdir/ file.bam.bc
+
+      Options:
+      -d, --dir <path>   - Directory for the graphs. Add a slash to create new directory.
+      -h, -?, --help     - This help message.
+
+      \n")
+
+  q(save="no")
+}
+
+## Parse arguments (we expect the form --arg value or -a value)
+
+#Set main argument (stats file)
+bamstats_link = args[length(args)]
+
+#Set the rest of arguments
+args = args[-length(args)]
+
+args = paste(args[c(TRUE, FALSE)],args[c(FALSE, TRUE)])
+
+parseArgs <- function(x) strsplit(sub("-*", "", x), " ")
+argsDF <- as.data.frame(do.call("rbind", parseArgs(args)))
+argsL <- as.list(as.character(argsDF$V2))
+names(argsL) <- argsDF$V1
+
+
+#Set the working directory or create a new one
+
+wd = ifelse ("d" %in% names(argsL) || "dir" %in% names(argsL),argsL[[which (names(argsL) == "dir" || names(argsL) == "d")]], getwd())
+
+if (strsplit(wd, "")[[1]][length(strsplit(wd,"")[[1]])] == '/'){
+  dir.create(wd)
+} else {
+  wd = paste(wd,'/',sep="")
+}
+
+
+# ## Arg1 default
+# if(is.null(args$arg1)) {
+#   ## do something
+# }
+
+
+## Required packages
+if (!require("RColorBrewer")) {
+  install.packages("RColorBrewer", dependencies = TRUE)
+  library(RColorBrewer)
+}
+
+
+colors_max = c("#000000", "#FFFF00", "#1CE6FF", "#FF34FF", "#FF4A46", "#008941", "#006FA6", "#A30059",
+               "#FFDBE5", "#7A4900", "#0000A6", "#63FFAC", "#B79762", "#004D43", "#8FB0FF", "#997D87",
+               "#5A0007", "#809693", "#FEFFE6", "#1B4400", "#4FC601", "#3B5DFF", "#4A3B53", "#FF2F80",
+               "#61615A", "#BA0900", "#6B7900", "#00C2A0", "#FFAA92", "#FF90C9", "#B903AA", "#D16100",
+               "#DDEFFF", "#000035", "#7B4F4B", "#A1C299", "#300018", "#0AA6D8", "#013349", "#00846F",
+               "#372101", "#FFB500", "#C2FFED", "#A079BF", "#CC0744", "#C0B9B2", "#C2FF99", "#001E09",
+               "#00489C", "#6F0062", "#0CBD66", "#EEC3FF", "#456D75", "#B77B68", "#7A87A1", "#788D66",
+               "#885578", "#FAD09F", "#FF8A9A", "#D157A0", "#BEC459", "#456648", "#0086ED", "#886F4C",
+
+               "#34362D", "#B4A8BD", "#00A6AA", "#452C2C", "#636375", "#A3C8C9", "#FF913F", "#938A81",
+               "#575329", "#00FECF", "#B05B6F", "#8CD0FF", "#3B9700", "#04F757", "#C8A1A1", "#1E6E00",
+               "#7900D7", "#A77500", "#6367A9", "#A05837", "#6B002C", "#772600", "#D790FF", "#9B9700",
+               "#549E79", "#FFF69F", "#201625", "#72418F", "#BC23FF", "#99ADC0", "#3A2465", "#922329",
+               "#5B4534", "#FDE8DC", "#404E55", "#0089A3", "#CB7E98", "#A4E804", "#324E72", "#6A3A4C",
+               "#83AB58", "#001C1E", "#D1F7CE", "#004B28", "#C8D0F6", "#A3A489", "#806C66", "#222800",
+               "#BF5650", "#E83000", "#66796D", "#DA007C", "#FF1A59", "#8ADBB4", "#1E0200", "#5B4E51",
+               "#C895C5", "#320033", "#FF6832", "#66E1D3", "#CFCDAC", "#D0AC94", "#7ED379", "#012C58",
+
+               "#7A7BFF", "#D68E01", "#353339", "#78AFA1", "#FEB2C6", "#75797C", "#837393", "#943A4D",
+               "#B5F4FF", "#D2DCD5", "#9556BD", "#6A714A", "#001325", "#02525F", "#0AA3F7", "#E98176",
+               "#DBD5DD", "#5EBCD1", "#3D4F44", "#7E6405", "#02684E", "#962B75", "#8D8546", "#9695C5",
+               "#E773CE", "#D86A78", "#3E89BE", "#CA834E", "#518A87", "#5B113C", "#55813B", "#E704C4",
+               "#00005F", "#A97399", "#4B8160", "#59738A", "#FF5DA7", "#F7C9BF", "#643127", "#513A01",
+               "#6B94AA", "#51A058", "#A45B02", "#1D1702", "#E20027", "#E7AB63", "#4C6001", "#9C6966",
+               "#64547B", "#97979E", "#006A66", "#391406", "#F4D749", "#0045D2", "#006C31", "#DDB6D0",
+               "#7C6571", "#9FB2A4", "#00D891", "#15A08A", "#BC65E9", "#FFFFFE", "#C6DC99", "#203B3C",
+
+               "#671190", "#6B3A64", "#F5E1FF", "#FFA0F2", "#CCAA35", "#374527", "#8BB400", "#797868",
+               "#C6005A", "#3B000A", "#C86240", "#29607C", "#402334", "#7D5A44", "#CCB87C", "#B88183",
+               "#AA5199", "#B5D6C3", "#A38469", "#9F94F0", "#A74571", "#B894A6", "#71BB8C", "#00B433",
+               "#789EC9", "#6D80BA", "#953F00", "#5EFF03", "#E4FFFC", "#1BE177", "#BCB1E5", "#76912F",
+               "#003109", "#0060CD", "#D20096", "#895563", "#29201D", "#5B3213", "#A76F42", "#89412E",
+               "#1A3A2A", "#494B5A", "#A88C85", "#F4ABAA", "#A3F3AB", "#00C6C8", "#EA8B66", "#958A9F",
+               "#BDC9D2", "#9FA064", "#BE4700", "#658188", "#83A485", "#453C23", "#47675D", "#3A3F00",
+               "#061203", "#DFFB71", "#868E7E", "#98D058", "#6C8F7D", "#D7BFC2", "#3C3E6E", "#D83D66",
+
+               "#2F5D9B", "#6C5E46", "#D25B88", "#5B656C", "#00B57F", "#545C46", "#866097", "#365D25",
+               "#252F99", "#00CCFF", "#674E60", "#FC009C", "#92896B")
+
+
+
+
+
+# Function: error {} throw error if something happends
+# Function: parse_params {} get values from parameters if defined
+# Function: do_ref_stats {} caculate GC stats
+# Function: plot {} generate plot with gnuplot from system
+# Function: open_file {} get file from command line or STDIN if pipe
+# Function: parse_bamcheck1 {} check if stats file is correct
+# Function: parse__bamcheck {} does bamcheck1 for all input
+# Function: add_to_matrix {}
+# Function: rebin_values {}
+# Function: merge_coverage {}
+# Function: merge_gcc {}
+# Function: merge_gcd {} not done
+# Funciton: get_value {}
+# Function: get_values {}
+
+
+get_name = function (opts) {
+  if ("/" %in% strsplit(opts,'')[[1]]) {
+    sub('.*\\/', '', opts)
+  }
+}
+
+get_values = function (opts,id) {
+  if (all(grepl(id, opts) == F)) {return ()}
+  id_value = opts[grep(paste('^',id,sep=""),opts)]
+  m_all=c()
+  i=1
+  while(i != length(id_value)+1){
+    x = id_value[i]
+    cycle=strsplit(x,split='\t')[[1]]
+    m=matrix(as.numeric(cycle[2:length(cycle)]),nrow = 1,ncol = length(cycle)-1)
+    m_all=rbind(m_all,m)
+    i = i + 1
+  }
+  return(m_all)
+}
+
+percentile = function(p, vals) {
+  N = 0
+  for (val in vals) {N = N + val}
+  n = p*(N + 1)/100
+  k = as.integer(n)
+  d = n - k
+  if (k <= 0){return (0)}
+  if (k >= N) {return (as.numeric(vals-1))}
+  cnt = 0
+  for (i in 1:length(vals)){
+    cnt = cnt + vals[i]
+    if (cnt >= k) {return (i)}
+  }
+  warning("FIXME: this should not happen [percentile]\n")
+}
+
+plot_qualities = function(fq) {
+  ffq = get_values(fq,'FFQ')
+  ffq = ffq[,2:ncol(ffq)]
+  rownames(ffq) = seq(1,nrow(ffq),1)
+  colnames(ffq) = seq(1,ncol(ffq),1)
+  lfq = get_values(fq,'LFQ')
+  lfq = lfq[,2:ncol(lfq)]
+  rownames(lfq) = seq(1,nrow(lfq),1)
+  colnames(lfq) = seq(1,ncol(lfq),1)
+  if (all(ffq[nrow(ffq),] == 0)){ffq = ffq[-nrow(ffq),]}
+  if (all(lfq[nrow(lfq),] == 0)){lfq = lfq[-nrow(lfq),]}
+
+  p25_ffq = apply(ffq[,1:(ncol(ffq))],1,function(x){percentile(25,x)})
+  p50_ffq = apply(ffq[,1:(ncol(ffq))],1,function(x){percentile(50,x)})
+  p75_ffq = apply(ffq[,1:(ncol(ffq))],1,function(x){percentile(75,x)})
+
+  p25_lfq = apply(lfq[,1:(ncol(lfq))],1,function(x){percentile(25,x)})
+  p50_lfq = apply(lfq[,1:(ncol(lfq))],1,function(x){percentile(50,x)})
+  p75_lfq = apply(lfq[,1:(ncol(lfq))],1,function(x){percentile(75,x)})
+
+
+
+  mqFFQ <- apply(ffq/1000000,1,function(cycle){
+    sum(as.integer(names(cycle))*cycle) / sum(cycle)
+  })
+  mqLFQ <- apply(lfq/1000000,1,function(cycle){
+    sum(as.integer(names(cycle))*cycle) / sum(cycle)
+  })
+  # Average quality per cycle, forward and reverse reads in one plot
+  png(paste(wd,"quals1.png", sep=""),res=100,height = 500,width = 600)
+  par(mar=c(5, 4, 4, 2) + 0.1)
+  cycles=as.integer(rownames(ffq))
+  quals=as.integer(colnames(ffq))
+  plot(cycles,mqFFQ, type='l',
+       xlim = c(min(cycles),max(cycles)),
+       ylim = c(min(quals),max(quals)+10),
+       col='firebrick3',
+       xlab = 'Cycle',
+       ylab = 'Average Quality',
+       las=1,
+       main = main_name,
+       font.main = 1)
+  lines(cycles,mqLFQ,col="green3")
+  legend('topright',c('Forward reads','Reverse reads'),col=c('firebrick3','green3'),lty=1, cex=1)
+  d = dev.off()
+
+  # Average, mean and quality percentiles per cycle, forward and reverse reads in separate plots
+  png(paste(wd,"quals2.png", sep=""),res=100,height = 500,width = 700)
+  par(mfrow=c(1,2),mar=c(4, 4, 2, 1) + 0.1)
+  plot(cycles,mqFFQ, type='l',
+       xlim = c(min(cycles),max(cycles)),
+       ylim = c(min(quals),max(quals)+10),
+       col=NULL,
+       xlab = 'Cycle',
+       ylab = 'Average Quality',
+       las=1)
+  polygon(c(rownames(ffq),rev(rownames(ffq))),c(p25_ffq,rev(p75_ffq)),border = NA,col = "gray89")
+  lines(cycles,p50_ffq,col='black')
+  lines(cycles,mqFFQ,col='firebrick3')
+  legend('topright',c('25-75th percentile','Median','Mean'),col=c('gray89','black','firebrick3'),pch=c('-',NA,NA),pt.cex=c(5,1,1),lty=c(NA,1,1), cex=0.8)
+
+  par(mar=c(4, 0, 2, 5) + 0.1)
+  p = plot(cycles,mqLFQ, type='l',
+           yaxt='n',
+           xlim = c(min(cycles),max(cycles)),
+           ylim = c(min(quals),max(quals)+10),
+           col=NULL,
+           xlab = 'Cycle',
+           ylab = ''
+  )
+  polygon(c(rownames(lfq),rev(rownames(lfq))),c(p25_lfq,rev(p75_lfq)),border = NA,col = "gray89")
+  lines(cycles,p50_lfq,col='black')
+  lines(cycles,mqLFQ,col='green3')
+
+  axis(4,at=p,las=1)
+  mtext("Average Quality", side=4, line=2.5, cex.lab=1)
+
+  legend('topright',c('25-75th percentile','Median','Mean'),col=c('gray89','black','green3'),pch=c('-',NA,NA),lty=c(NA,1,1),pt.cex=c(5,0.7,0.7),cex=0.8)
+  mtext(side = 3,text = main_name,cex=1.3,font=1,line = -1.5,outer = TRUE)
+
+  d = dev.off()
+
+  # Quality distribution per cycle, the distribution is for each cycle plotted as a separate curve
+  png(paste(wd,"quals3.png", sep=""),res=100,height = 500,width = 700)
+  par(mfrow=c(2,1),mar=c(1, 5, 3, 1) + 0.1)
+  plot(mqFFQ,cycles, type='l',
+       xlim = c(0,max(mqFFQ)+3),
+       ylim = c(min(ffq),max(ffq)),
+       col=NULL,
+       xlab = '',
+       ylab = '',
+       xaxt='n',
+       las=2,
+       main = main_name,
+       font.main = 1)
+
+  for (i in 1:length(cycles)) {
+    lines(colnames(ffq),
+          ffq[i,],
+          col=colors_max[seq(3,length(colors_max),1)][i])
+  }
+
+  par(mar=c(4, 5, 0, 1) + 0.1)
+  plot(mqLFQ,cycles, type='l',
+       xlim = c(0,max(mqLFQ)+3),
+       ylim = c(min(lfq),max(lfq)),
+       col=NULL,
+       xlab = '',
+       ylab = '',
+       xaxt='n',
+       las=2
+  )
+
+  axis(1,at=seq(0,max(mqLFQ)+3,5),labels = seq(0,max(mqLFQ)+3,5))
+  mtext("Quality",1,line = 2.5)
+  for (i in 1:length(cycles)) {
+    lines(colnames(lfq),
+          lfq[i,],
+          col=colors_max[seq(3,length(colors_max),1)][i])
+  }
+  d = dev.off()
+
+
+  # Heatmap qualitites
+
+  png(paste(wd,"quals4.png", sep=""),res=100,height = 550,width = 700)
+  range.i <- range(ffq)
+  extr <- max(abs(range.i))
+
+  par(mar=c(0,3,3,0), omi=(c(0.6,0.2,0.2,0)))
+  layout(matrix(c(1,2,3,3), nrow=2, byrow=F), heights=c(1, 1), widths=c(0.8,0.2))
+
+  breaks <- 10000
+  z <- seq(0, extr, length = breaks+1)
+  palette <- colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(breaks)
+  #palette <- colorRampPalette(c("cyan", "black","red"))(breaks)
+  #palette <- colorRampPalette(c("black", "blue","green","red","white"))(breaks)
+
+  ##### 1 - heatmap FFQ
+  par(mar=c(0.5,4,1,0))
+  image(x=1:ncol(ffq), y=1:nrow(ffq), t(ffq), axes=F, col=palette, breaks=z, xlab="",ylab="Cycle (Fwd reads)",cex.lab=1.2,main = main_name,font.main = 1)
+  box()
+  axis(2, at=seq(0,nrow(ffq),10), labels = seq(0,nrow(ffq),10), las = 2, tick = 0,cex.axis=1.1)
+  ##### 2 - heatmap LFQ
+  par(mar=c(1,4,1,0))
+  image(x=1:ncol(lfq), y=1:nrow(lfq), t(lfq), axes=F, col=palette,breaks=z, xlab = "Quality",
+        ylab="Cycle (Rev reads)",cex.lab=1.2)
+  box()
+  axis(1, at=seq(0,ncol(lfq),5), labels = seq(0,ncol(lfq),5), las = 1, line = -0.5, tick = 0,cex.axis=1.1)
+  mtext("Quality",1,line = 2)
+  axis(2, at=seq(0,nrow(lfq),10), labels = seq(0,nrow(lfq),10), las = 2, tick = 0,cex.axis=1.1)
+
+  ##### 3 -scale
+  scale01 <- function(x, low = min(x), high = max(x)) {
+    x <- (x - low)/(high - low)
+    x
+  }
+  par(mar=c(0,2,0,5))
+  image(z = t(matrix(z)), col = palette, breaks = z, xaxt = "n", yaxt = "n", axes=F)
+  box(lwd=1)
+  lv <- pretty(z)
+  xv <- scale01(as.numeric(lv),0, +extr)
+  axis(4, at = xv, labels = lv, las=2, font=1, lwd = 1, cex=1.2, cex.axis=1.2, tck= 1, padj=0,lty=2)
+  d = dev.off()
+}
+
+plot_acgt_cycles = function (acgt) {
+
+  gcc = get_values(acgt,"GCC")
+  gcc=gcc[,2:ncol(gcc)]
+  rownames(gcc) = seq(1,nrow(gcc),1)
+  colnames(gcc) = c("A","C","G","T","N","O")
+  cycles=as.integer(rownames(gcc))
+
+  png(paste(wd,"acgt_cycles.png", sep=""),res=100,height = 500,width = 600)
+  par(mar=c(5, 4, 4, 2) + 0.1)
+  plot(cycles,1:length(cycles), type='l',
+       xlim = c(min(cycles),max(cycles)),
+       ylim = c(0,100),
+       col=NULL,
+       xlab = 'Cycle',
+       ylab = 'Average Quality',
+       las=1,
+       main = main_name,
+       font.main = 1)
+
+  lines(cycles,gcc[,"A"],col="green3")
+  lines(cycles,gcc[,"G"],col="black")
+  lines(cycles,gcc[,"C"],col="firebrick3")
+  lines(cycles,gcc[,"T"],col="dodgerblue3")
+
+  legend('topright',c('A','C','G','T'),col=c('green3','firebrick3','black','dodgerblue3'),lty=1, cex=1)
+
+  d = dev.off()
+}
+
+plot_gc = function(gc) {
+  gcf = get_values(gc,"GCF")
+  rownames(gcf) = seq(1,nrow(gcf),1)
+  colnames(gcf) = c("gc","freq")
+  gcf[,"freq"] = gcf[,"freq"]/max(gcf[,"freq"])
+
+  gcl = get_values(gc,"GCL")
+  rownames(gcl) = seq(1,nrow(gcl),1)
+  colnames(gcl) = c("gc","freq")
+  gcl[,"freq"] = gcl[,"freq"]/max(gcl[,"freq"])
+
+  png(paste(wd,"gc_content.png", sep=""),res=100,height = 500,width = 600)
+  par(mar=c(5, 4, 4, 2) + 0.1)
+  plot(gcf[,"gc"],gcf[,"freq"], type='l',
+       xlim = c(min(gcf[,"gc"]),max(gcf[,"gc"])),
+       ylim = c(0,1),
+       col=NULL,
+       xlab = 'GC Content (%)',
+       ylab = 'Normalized Frequency',
+       las=1,
+       main = main_name,
+       font.main = 1)
+
+
+  lines(gcl[,"gc"],gcl[,"freq"],col="green3")
+  lines(gcf[,"gc"],gcf[,"freq"],col="firebrick3")
+
+  legend('topright',c('First fragments','Last fragments'),col=c('firebrick3','green3'),lty=1, cex=1)
+  legend('topleft',c(paste("Mean (first fragments)= ",round(sum(gcf[,"gc"]*gcf[,"freq"])/sum(gcf[,"freq"]),2),"  ",sep=""),
+                     paste("Mean (last fragments) = ",round(sum(gcl[,"gc"]*gcl[,"freq"])/sum(gcl[,"freq"]),2),"  ", sep=""),
+                     paste("Median (first fragments) = ",round(gcf[which(gcf[,"freq"] == 1),"gc"],2),"  ",sep=""),
+                     paste("Median (last fragments) = ", round(gcl[which(gcl[,"freq"] == 1),"gc"],2),"  ", sep="")),
+         cex=0.6,bg="transparent")
+  d = dev.off()
+
+}
+
+plot_gc_depth = function(gc_depth) {
+  gcd = get_values(gc_depth,'GCD')
+  colnames(gcd) = c('gc_%','unique_seq_prts','p10','p25','p50','p75','p90')
+
+
+  png(paste(wd,"gc_depth.png", sep=""),res=100,height = 500,width = 600)
+  par(mar=c(5, 4, 6, 2) + 0.1)
+  plot(seq(1,100,1),seq(1,100,1), type='l',
+       xlim = c(0,100),
+       ylim = c(0,100),
+       col=NULL,
+       xlab = 'Percentile of mapped sequence ordered by GC content',
+       ylab = 'Mapped depth',
+       las=1,
+       xaxs="i",
+       yaxs="i")
+
+
+  polygon(c(gcd[,"unique_seq_prts"],rev(gcd[,"unique_seq_prts"])),c(gcd[,"p10"],rev(gcd[,"p90"])),border = NA,col = "gray89")
+  polygon(c(gcd[,"unique_seq_prts"],rev(gcd[,"unique_seq_prts"])),c(gcd[,"p25"],rev(gcd[,"p75"])),border = NA,col = "lightskyblue1")
+  lines(gcd[,"unique_seq_prts"],gcd[,"p50"],col="dodgerblue3")
+
+  legend('topright',c('10-90th percentile','25-75th percentile','Median'),col=c('gray89','lightskyblue1','dodgerblue3'),pch=c('-','-',NA),pt.cex=c(5,5,1),lty=c(NA,NA,1), cex=0.9)
+
+  axis(3, at = c(gcd[gcd[,"gc_%"] >= 30,"unique_seq_prts"][1],gcd[gcd[,"gc_%"] == 40,"unique_seq_prts"],gcd[gcd[,"gc_%"] == 50,"unique_seq_prts"]),labels = c(30,40,50))
+  mtext("GC Content (%)", side = 3,line = 2)
+  mtext(main_name, side = 3,line = 3.7)
+
+  d = dev.off()
+
+}
+
+plot_isize = function(ins_size) {
+
+  isizes = get_values(ins_size,'IS')
+  colnames(isizes) = c('insert_size','pairs_total','inward_pairs','outward_pairs','other_pairs')
+
+  png(paste(wd,"insert_size.png", sep=""),res=100,height = 500,width = 600)
+  par(mar=c(5, 6, 4, 2) + 0.1)
+  plot(isizes[,'insert_size'],isizes[,'pairs_total'], type='l',
+       xlim = c(min(isizes[,"insert_size"]),mean(isizes[,'insert_size'])*2.5),
+       ylim = c(0,max(isizes[,'pairs_total'])+mean(isizes[,'pairs_total'])/2),
+       col=NULL,
+       xlab = 'Insert Size',
+       ylab = '',
+       las=1,
+       xaxs="i",
+       yaxs="i",
+       main = main_name,
+       font.main = 1
+  )
+
+  mtext("Number of pairs",2,line = 5)
+  lines(isizes[,'insert_size'],isizes[,'pairs_total'],col="black")
+  lines(isizes[,'insert_size'],isizes[,'inward_pairs'],col="green3")
+  lines(isizes[,'insert_size'],isizes[,'outward_pairs'],col="dodgerblue3")
+  lines(isizes[,'insert_size'],isizes[,'other_pairs'],col="firebrick3")
+
+  legend('topright',c('All pairs','Inward','Outward','Other'),col=c('black','green3','dodgerblue3','firebrick3'),lty=1, cex=1)
+  text(isizes[which(isizes[,'inward_pairs'] == max(isizes[,'inward_pairs'])),'insert_size']+mean(isizes[,'insert_size']/5),
+       isizes[which(isizes[,'inward_pairs'] == max(isizes[,'inward_pairs'])),'pairs_total']-(mean(isizes[,'inward_pairs'])/5),
+       isizes[which(isizes[,'inward_pairs'] == max(isizes[,'inward_pairs'])),'insert_size'])
+
+  d = dev.off()
+
+}
+
+plot_coverage = function(cov_distr) {
+  cov = suppressWarnings(get_values(cov_distr,'COV')[,2:3])
+  colnames(cov) = c('num','bases')
+
+  png(paste(wd,"coverage.png", sep=""),res=100,height = 500,width = 600)
+  par(mar=c(5, 6, 4, 2) + 0.1)
+  plot(cov[,'num'],cov[,'bases'], type='l',
+       xlim = c(0,(round(sum(cov[,"num"]*cov[,"bases"])/sum(cov[,"bases"]),2))*4),
+       ylim = c(0,max(cov[,'bases'])+mean(cov[,'bases'])/2),
+       col="firebrick3",
+       xlab = 'Coverage',
+       ylab = '',
+       las=1,
+       xaxs="i",
+       yaxs="i",
+       main = main_name,
+       font.main = 1)
+
+  mcov = round(sum(cov[,"num"]*cov[,"bases"])/sum(cov[,"bases"]),2)
+  abline(v = mcov,col='black',lty=2)
+  legend('topright',c('Coverage','Mean Coverage'),col=c('firebrick3','black'),lty=c(1,2), cex=1)
+
+  mtext("Number of mapped bases",2,line = 5)
+  text(mcov+mcov/2,
+       cov[which(cov[,'num'] >= round(mcov))[1],'bases'],
+       mcov)
+
+  d = dev.off()
+}
+
+plot_indel_dist = function(ind) {
+  indels = get_values(ind,'ID')
+  colnames(indels) = c('length','insertions','deletions')
+  ratio = indels[,'insertions']/indels[,'deletions']
+
+  png(paste(wd,"indel_dist.png", sep=""),res=100,height = 500,width = 600)
+  par(mar=c(5, 6, 4, 5) + 0.1)
+  plot(1:nrow(indels),indels[,'deletions']+1, type='l',
+       xlim = c(0,nrow(indels)+5),
+       col=NULL,
+       xlab = 'Indel length',
+       ylab = '',
+       las=1,
+       xaxs="i",
+       yaxs='i',
+       log='y',
+       yaxt='n',
+       main = main_name,
+       font.main = 1)
+
+  mtext("Indel count (log)",2,line = 5)
+  axis(2,las=1,at = c(10,100,1000,10000,100000,1000000,1000000),labels = c(10,100,1000,10000,100000,1000000,1000000))
+  lines(1:nrow(indels),indels[,'insertions']+1,col="firebrick3")
+  lines(1:nrow(indels),indels[,'deletions']+1,col="black")
+  legend('topright',c('Insertions','Deletions','Ins/Dels ratio'),col=c('firebrick3','black','green3'),lty=1, cex=1)
+
+  par(new=T)
+  rat = plot(1:nrow(indels),ratio,type='l',axes=F,col="green3",
+       xaxs='i',yaxs='i',ylab='',xlab='')
+  axis(4,at = seq(0,1,0.1),labels = seq(0,1,0.1),las=1)
+  mtext("Insertions/Deletions ratio",4,line = 3)
+  d = dev.off()
+}
+
+plot_indel_cycles = function(indel_cycle) {
+  indel = get_values(indel_cycle,'IC')
+  colnames(indel) = c('cycle','ins_fwd','ins_rev','dels_fwd','dels_rev')
+
+  png(paste(wd,"indel_cycles.png", sep=""),res=100,height = 500,width = 600)
+  par(mar=c(5, 6, 4, 2) + 0.1)
+  plot(indel['cycle'],indel['cycle'], type='l',
+       xlim = c(0,max(indel[,'cycle'])),
+       ylim = c(0,max(indel[,c('ins_fwd','ins_rev','dels_fwd','dels_rev')])+mean(indel[,c('ins_fwd','ins_rev','dels_fwd','dels_rev')]/2)),
+       col=NULL,
+       xlab = 'Read Cycle',
+       ylab = '',
+       las=1,
+       yaxs='i',
+       main = main_name,
+       font.main = 1)
+
+  mtext ("Indel count",2,line = 5)
+  lines(indel[,'cycle'],indel[,'ins_fwd'],col="firebrick3")
+  lines(indel[,'cycle'],indel[,'ins_rev'],col="black")
+  lines(indel[,'cycle'],indel[,'dels_fwd'],col="green3")
+  lines(indel[,'cycle'],indel[,'dels_rev'],col="dodgerblue3")
+
+  legend('topright',c('Insertions (fwd)','Insertions (rev)','Deletions (fwd)','Deletions (rev)'),col=c('firebrick3','black','green3','dodgerblue3'),lty=1, cex=1)
+
+  d = dev.off()
+
+
+}
+
+
+
+
+bamstats = readLines(bamstats_link)
+main_name = get_name(bamstats_link)
+
+plot_qualities(bamstats)
+plot_acgt_cycles(bamstats)
+plot_gc(bamstats)
+plot_gc_depth(bamstats)
+plot_isize(bamstats)
+plot_coverage(bamstats)
+plot_indel_dist(bamstats)
+plot_indel_cycles(bamstats)
+# plot_mismatches_per_cycle(bamstats)
+
+# create_html(bamstats)
+
+
+con = file(paste(wd,"index.html",sep=""),'w')
+cat ('
+    <html>
+    <head>
+        <style>
+            .thumbnail
+            {
+                text-decoration:none;
+                color:black;
+                font-weight:bold;
+            }
+            .thumbnail span  /*CSS for enlarged image*/
+            {
+                visibility: hidden;
+                position: absolute;
+                padding: 5px;
+                border: 1px solid #000;
+                background-color: #e5e5e5;
+            }
+            .thumbnail:hover span  /*CSS for enlarged image on hover*/
+            {
+                visibility: visible;
+                left: 550px;
+                top: 10px;
+            }
+            .imgs td
+            {
+                vertical-align:middle;
+                padding: 0.5em;
+                border: 1px solid black;
+            }
+            table.imgs
+            {
+                border-collapse:collapse;
+                margin-left:20px;
+            }
+            .nums th
+            {
+                text-align: left;
+            }
+            table.nums
+            {
+                margin-top: 1em;
+                margin-left:20px;
+                border: 1px dotted #83A4C3;
+                background-color: #F5F5F5;
+                padding: 0.5em;
+            }
+            .pad { padding-left:1em; vertical-align:top; }
+            .right { text-align:right; padding-left:1em; }
+         </style>
+    </head>
+    <body>
+      <table class="imgs">
+     ',
+     sep = "", file=con)
+
+imgs = c(
+  'insert_size'    = 'Insert size',
+  'gc_content'     = 'GC content',
+  'acgt_cycles'    = 'Per-base sequence content',
+  'quals1'          = 'Quality per cycle',
+  'quals2'         = 'Quality per cycle',
+  'quals3'         = 'Quality per cycle',
+  'quals4'         = 'Quality per cycle',
+  'coverage'       = 'Coverage',
+  'indel_cycles'   = 'Indels per cycle',
+  'indel_dist'     = 'Indel lengths',
+  'gc_depth'       = 'Mapped depth vs GC'
+)
+
+for (i in 1:length(imgs)) {
+  if (i %% 3 == 0){
+    cat ('<td><a class="thumbnail" href="',names(imgs[i]),'.png"><img src="',names(imgs[i]),'.png" width="150px"><span>',imgs[i],'<br><img src="',names(imgs[i]),'.png"></span></a>\n',sep="",file=con)
+    cat ('</tr>\n',sep="",file=con)
+  } else if ((i - 1) %% 3 == 0 || i == 1){
+    cat ('<tr><td><a class="thumbnail" href="',names(imgs[i]),'.png"><img src="',names(imgs[i]),'.png" width="150px"><span>',imgs[i],'<br><img src="',names(imgs[i]),'.png"></span></a>\n',sep="",file=con)
+  } else {
+    cat ('<td><a class="thumbnail" href="',names(imgs[i]),'.png"><img src="',names(imgs[i]),'.png" width="150px"><span>',imgs[i],'<br><img src="',names(imgs[i]),'.png"></span></a>\n',sep="",file=con)
+  }
+}
+
+cat ('
+    </body>
+    </html>
+     ',file=con)
+
+
+close(con)
