@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-rm(list=ls())
+# rm(list=ls())
 
 ## Collect arguments
 args = commandArgs(trailingOnly=TRUE)
